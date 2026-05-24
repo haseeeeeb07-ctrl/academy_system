@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import mysql.connector
 import os
@@ -8,24 +8,19 @@ app = Flask(__name__)
 CORS(app)
 
 def getDB():
-    # 1. This reads the secret Aiven link you pasted into Render
     db_url = os.environ.get("DATABASE_URL")
-    
-    # 2. This breaks down that long link into host, user, and password automatically
     url = urlparse.urlparse(db_url)
-    
-    # 3. This connects your Flask app to the live cloud database
     return mysql.connector.connect(
-        host=url.hostname,
-        user=url.username,
-        password=url.password,
-        database=url.path[1:], # removes the "/" from the database name
-        port=url.port
+        host     = url.hostname,
+        user     = url.username,
+        password = url.password,
+        database = url.path[1:],
+        port     = url.port
     )
 
 @app.route('/')
 def index():
-   return render_templates('academy.html')
+    return render_template('academy.html')
 
 @app.route('/api/students', methods=['GET'])
 def getStudents():
@@ -213,8 +208,5 @@ def searchTeacher(tid):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    print("====================================")
-    print("  Academy Management System Server  ")
-    print("  Running on http://localhost:5000   ")
-    print("====================================")
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
