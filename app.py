@@ -11,14 +11,14 @@ def getDB():
     db_url = os.environ.get("DATABASE_URL")
     url = urlparse.urlparse(db_url)
     return mysql.connector.connect(
-        host     = url.hostname,
-        user     = url.username,
-        password = url.password,
-        database = url.path[1:],
-        port     = url.port,
+        host         = url.hostname,
+        user         = url.username,
+        password     = url.password,
+        database     = url.path[1:],
+        port         = url.port,
+        ssl_ca       = False,
         ssl_disabled = False
     )
-
 @app.route('/')
 def index():
     return render_template('academy.html')
