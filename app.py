@@ -25,7 +25,7 @@ def getDB():
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'academy.html')
+   return render_templates('academy.html')
 
 @app.route('/api/students', methods=['GET'])
 def getStudents():
