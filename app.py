@@ -15,7 +15,8 @@ def getDB():
         user     = url.username,
         password = url.password,
         database = url.path[1:],
-        port     = url.port
+        port     = url.port,
+        ssl_disabled = False
     )
 
 @app.route('/')
