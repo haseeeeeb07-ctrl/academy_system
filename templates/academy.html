@@ -442,7 +442,7 @@ tbody tr:hover td{background:var(--bg3)}
 <div class="toast" id="toast"><div class="toast-dot"></div><span id="toast-msg"></span></div>
 
 <script>
-const API = 'http://localhost:5000/api';
+const API = '/api';
 const FEE = [[1500,1200,1400,1000,1400],[1600,1300,1500,1100,1500],[2000,1700,1900,1400,1900],[2200,1900,2100,1600,2100]];
 const CLASSES = ['Class 9','Class 10','1st Year','2nd Year'];
 const SUBJECTS = ['Math','English','Chemistry','Urdu','Physics'];
@@ -460,7 +460,7 @@ async function checkServer(){
     }
   } catch(e){
     document.getElementById('srv-dot').style.background='var(--red)';
-    document.getElementById('srv-txt').textContent='Server offline — start app.py first';
+   document.getElementById('srv-txt').textContent='Server offline';
     document.getElementById('db-badge').classList.add('offline');
     document.getElementById('db-txt').textContent='MySQL Offline';
   }
