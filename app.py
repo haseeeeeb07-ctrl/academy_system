@@ -8,11 +8,11 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
-# Academic pricing structure mapping exactly to front-end constraints
+# Fixed configurations aligning with the frontend Matrix UI
 CLASS_MATRIX = [
     {"class_index": 0, "class_label": "Class 9", "base_fee": 1500, "per_subject_fee": 300},
     {"class_index": 1, "class_label": "Class 10", "base_fee": 1600, "per_subject_fee": 350},
-    {"class_index": 2, "class_label": "1st Year", "base_fee": 2000, "per_subject_fee": 400},
+    {"class_index": 2, "st_year": "1st Year", "class_label": "1st Year", "base_fee": 2000, "per_subject_fee": 400},
     {"class_index": 3, "class_label": "2nd Year", "base_fee": 2200, "per_subject_fee": 450}
 ]
 
@@ -47,7 +47,7 @@ def index():
     return render_template('academy.html')
 
 # ==========================================
-# INFRASTRUCTURE ENDPOINTS
+# SYSTEM CORE UTILITIES
 # ==========================================
 
 @app.route('/api/ping', methods=['GET'])
@@ -60,13 +60,13 @@ def login():
     username = data.get('username', '').strip()
     password = data.get('password', '')
     
-    # Placeholder validation mechanism matching administrative console layout rules
+    # Secure validation placeholder matching the visual layer defaults
     if username == "admin" and password == "admin123":
         return jsonify({"authenticated": True})
     else:
         return jsonify({
             "authenticated": False, 
-            "message": "Invalid security credential validation.",
+            "message": "Invalid access credentials.",
             "remaining_attempts": 3
         }), 401
 
@@ -78,7 +78,7 @@ def get_config():
     })
 
 # ==========================================
-# DASHBOARD ENDPOINT
+# DASHBOARD TELEMETRY
 # ==========================================
 
 @app.route('/api/dashboard', methods=['GET'])
@@ -87,11 +87,17 @@ def get_dashboard():
         db = getDB()
         cur = db.cursor(dictionary=True)
         
-        # Pull core metric telemetry counts
+        # Calculate totals
         cur.execute("SELECT COUNT(*) as total FROM students")
         total_students = cur.fetchone()['total'] or 0
         
-        cur.execute("SELECT COUNT(*) as total, SUM(CASE WHEN status='Paid' THEN 1 ELSE 0 END) as paid, SUM(amount) as total_val, SUM(CASE WHEN status='Pending' THEN amount ELSE 0 END) as pending_val FROM ledger")
+        cur.execute("""
+            SELECT 
+                COUNT(*) as total, 
+                SUM(CASE WHEN status='Paid' THEN 1 ELSE 0 END) as paid, 
+                SUM(CASE WHEN status='Pending' THEN amount ELSE 0 END) as pending_val 
+            FROM ledger
+        """)
         ledger_stats = cur.fetchone()
         
         total_vouchers = ledger_stats['total'] or 0
@@ -100,7 +106,7 @@ def get_dashboard():
         
         collection_rate = int((paid_vouchers / total_vouchers) * 100) if total_vouchers > 0 else 0
         
-        # Recent pipelined objects processing streams
+        # Fetch recent billing items for data pipeline view
         cur.execute("""
             SELECT l.amount, l.status, s.name, s.class_idx 
             FROM ledger l 
@@ -131,7 +137,7 @@ def get_dashboard():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# STUDENT RECORDS MANAGEMENT
+# STUDENT OPERATIONS
 # ==========================================
 
 @app.route('/api/students', methods=['GET'])
@@ -146,7 +152,7 @@ def get_students():
         for r in rows:
             lbl = next((c['class_label'] for c in CLASS_MATRIX if c['class_index'] == r['class_idx']), f"Class {r['class_idx']}")
             
-            # Map structural columns back to matching arrays
+            # Reconstruct the subject array text representation for UI mapping
             subs = []
             if r.get('math'): subs.append("Math")
             if r.get('english'): subs.append("English")
@@ -183,8 +189,9 @@ def add_student():
         cur.execute("SELECT id FROM students WHERE id = %s", (sid,))
         if cur.fetchone():
             db.close()
-            return jsonify({"success": False, "message": f"Entity code identifier #{sid} collision found!"}), 400
+            return jsonify({"success": False, "message": f"Student ID #{sid} already exists!"}), 400
         
+        # Translate subject configurations into explicit table rows
         math = 1 if "Math" in subjects else 0
         english = 1 if "English" in subjects else 0
         chemistry = 1 if "Chemistry" in subjects else 0
@@ -220,7 +227,7 @@ def delete_student():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# FACULTY PROFILES MANAGEMENT
+# TEACHER OPERATIONS
 # ==========================================
 
 @app.route('/api/teachers', methods=['GET'])
@@ -247,7 +254,7 @@ def add_teacher():
         cur.execute("SELECT id FROM teachers WHERE id = %s", (tid,))
         if cur.fetchone():
             db.close()
-            return jsonify({"success": False, "message": f"Instructor ID node #{tid} collision found!"}), 400
+            return jsonify({"success": False, "message": f"Teacher ID #{tid} already exists!"}), 400
             
         cur.execute("INSERT INTO teachers (id, name) VALUES (%s, %s)", (tid, name))
         db.commit()
@@ -270,7 +277,7 @@ def delete_teacher():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# ACCOUNTING LEDGER SYSTEM
+# FINANCIAL LEDGER & VOUCHER ENGINE
 # ==========================================
 
 @app.route('/api/ledger', methods=['GET'])
@@ -349,7 +356,7 @@ def generate_vouchers():
         
         generated_count = 0
         for s in students:
-            # Determine fee based on overrides or pricing matrices
+            # If explicit override is added, use it; otherwise compute based on selected courses
             if s['custom_fee'] is not None:
                 final_fee = int(s['custom_fee'])
             else:
@@ -357,7 +364,7 @@ def generate_vouchers():
                 sub_count = sum([s['math'], s['english'], s['chemistry'], s['urdu'], s['physics'], s['computer_science']])
                 final_fee = cfg['base_fee'] + (sub_count * cfg['per_subject_fee'])
             
-            # Formulate tracking index tokens
+            # Formulate tracking index tags cleanly
             v_token = f"V-{uuid.uuid4().hex[:6].upper()}-{s['id']}"
             cur.execute(
                 "INSERT INTO ledger (voucher_id, student_id, amount, status) VALUES (%s, %s, %s, 'Pending')",
@@ -384,7 +391,7 @@ def clear_ledger():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# DIAGNOSTIC AUDIT LOGS REPORT
+# REPORT COMPILATION LOGS
 # ==========================================
 
 @app.route('/api/report', methods=['GET'])
@@ -406,11 +413,11 @@ def generate_report():
         arrears = cur.fetchone()['val'] or 0
         
         report_text = f"""==================================================
-ADMINISTRATIVE MATRIX DIAGNOSTIC LOG AUDIT REPORT
+        ACADEMY SYSTEM AUDIT LOG DIAGNOSTIC REPORT
 ==================================================
 [SYSTEM EXECUTION STATUS]: STABLE DEPLOYMENT NODE
-[ACTIVE ENROLMENTS COUNT]: {total_s} Core Records
-[PROVISIONED FACULTY]: {total_t} Instructional Staff
+[ACTIVE ENROLMENTS COUNT]: {total_s} Students Registered
+[PROVISIONED FACULTY]: {total_t} Active Deployed Teachers
 
 [FINANCIAL LEDGER DIAGNOSTICS]:
  - Total Logged Settled Volume: Rs. {int(collected)}
@@ -418,7 +425,7 @@ ADMINISTRATIVE MATRIX DIAGNOSTIC LOG AUDIT REPORT
  - System Accounting Integrity Check: PASS
 
 ==================================================
-Report parsed from secure tracking layer successfully.
+Report processed successfully from the secure layer.
 """
         db.close()
         return jsonify({"report_text": report_text})
