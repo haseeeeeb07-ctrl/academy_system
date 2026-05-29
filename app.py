@@ -3,435 +3,211 @@ from flask_cors import CORS
 import mysql.connector
 import os
 import urllib.parse as urlparse
-import uuid
 
 app = Flask(__name__)
 CORS(app)
 
-# Fixed configurations aligning with the frontend Matrix UI
-CLASS_MATRIX = [
-    {"class_index": 0, "class_label": "Class 9", "base_fee": 1500, "per_subject_fee": 300},
-    {"class_index": 1, "class_label": "Class 10", "base_fee": 1600, "per_subject_fee": 350},
-    {"class_index": 2, "st_year": "1st Year", "class_label": "1st Year", "base_fee": 2000, "per_subject_fee": 400},
-    {"class_index": 3, "class_label": "2nd Year", "base_fee": 2200, "per_subject_fee": 450}
-]
-
-SUBJECTS_MAP = {
-    "0": ["Math", "English", "Chemistry", "Urdu", "Physics"],
-    "1": ["Math", "English", "Chemistry", "Urdu", "Physics"],
-    "2": ["Math", "English", "Physics", "Chemistry", "Computer Science"],
-    "3": ["Math", "English", "Physics", "Chemistry", "Computer Science"]
-}
-
 def getDB():
     db_url = os.environ.get("DATABASE_URL")
-    if db_url:
-        url = urlparse.urlparse(db_url)
-        return mysql.connector.connect(
-            host=url.hostname,
-            user=url.username,
-            password=url.password,
-            database=url.path[1:],
-            port=url.port,
-            ssl_disabled=False
-        )
+    url = urlparse.urlparse(db_url)
     return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",
-        database="academy_db"
+        host         = url.hostname,
+        user         = url.username,
+        password     = url.password,
+        database     = url.path[1:],
+        port         = url.port,
+      
+        ssl_disabled = False
     )
-
 @app.route('/')
 def index():
     return render_template('academy.html')
 
-# ==========================================
-# SYSTEM CORE UTILITIES
-# ==========================================
-
-@app.route('/api/ping', methods=['GET'])
-def ping():
-    return jsonify({"status": "online"})
-
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.json or {}
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
-    
-    # Secure validation placeholder matching the visual layer defaults
-    if username == "admin" and password == "admin123":
-        return jsonify({"authenticated": True})
-    else:
-        return jsonify({
-            "authenticated": False, 
-            "message": "Invalid access credentials.",
-            "remaining_attempts": 3
-        }), 401
-
-@app.route('/api/config', methods=['GET'])
-def get_config():
-    return jsonify({
-        "subjects_map": SUBJECTS_MAP,
-        "class_matrix": CLASS_MATRIX
-    })
-
-# ==========================================
-# DASHBOARD TELEMETRY
-# ==========================================
-
-@app.route('/api/dashboard', methods=['GET'])
-def get_dashboard():
-    try:
-        db = getDB()
-        cur = db.cursor(dictionary=True)
-        
-        # Calculate totals
-        cur.execute("SELECT COUNT(*) as total FROM students")
-        total_students = cur.fetchone()['total'] or 0
-        
-        cur.execute("""
-            SELECT 
-                COUNT(*) as total, 
-                SUM(CASE WHEN status='Paid' THEN 1 ELSE 0 END) as paid, 
-                SUM(CASE WHEN status='Pending' THEN amount ELSE 0 END) as pending_val 
-            FROM ledger
-        """)
-        ledger_stats = cur.fetchone()
-        
-        total_vouchers = ledger_stats['total'] or 0
-        paid_vouchers = ledger_stats['paid'] or 0
-        total_pending = ledger_stats['pending_val'] or 0
-        
-        collection_rate = int((paid_vouchers / total_vouchers) * 100) if total_vouchers > 0 else 0
-        
-        # Fetch recent billing items for data pipeline view
-        cur.execute("""
-            SELECT l.amount, l.status, s.name, s.class_idx 
-            FROM ledger l 
-            JOIN students s ON l.student_id = s.id 
-            ORDER BY l.voucher_id DESC LIMIT 5
-        """)
-        vouchers_raw = cur.fetchall()
-        recent_vouchers = []
-        for v in vouchers_raw:
-            lbl = next((c['class_label'] for c in CLASS_MATRIX if c['class_index'] == v['class_idx']), f"Class {v['class_idx']}")
-            recent_vouchers.append({
-                "name": v['name'],
-                "class": lbl,
-                "amount": int(v['amount']),
-                "status": v['status']
-            })
-            
-        db.close()
-        return jsonify({
-            "metrics": {
-                "total_students": total_students,
-                "collection_rate": collection_rate,
-                "total_pending": int(total_pending)
-            },
-            "recent_vouchers": recent_vouchers
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ==========================================
-# STUDENT OPERATIONS
-# ==========================================
-
 @app.route('/api/students', methods=['GET'])
-def get_students():
+def getStudents():
     try:
-        db = getDB()
+        db  = getDB()
         cur = db.cursor(dictionary=True)
         cur.execute("SELECT * FROM students")
         rows = cur.fetchall()
-        
-        students_list = []
         for r in rows:
-            lbl = next((c['class_label'] for c in CLASS_MATRIX if c['class_index'] == r['class_idx']), f"Class {r['class_idx']}")
-            
-            # Reconstruct the subject array text representation for UI mapping
-            subs = []
-            if r.get('math'): subs.append("Math")
-            if r.get('english'): subs.append("English")
-            if r.get('chemistry'): subs.append("Chemistry")
-            if r.get('urdu'): subs.append("Urdu")
-            if r.get('physics'): subs.append("Physics")
-            if r.get('computer_science'): subs.append("Computer Science")
-            
-            students_list.append({
-                "id": r['id'],
-                "name": r['name'],
-                "class_idx": r['class_idx'],
-                "class_label": lbl,
-                "custom_fee": int(r['custom_fee']) if r['custom_fee'] is not None else None,
-                "subjects": subs
-            })
+            r['subs'] = []
+            if r['math']:      r['subs'].append(0)
+            if r['english']:   r['subs'].append(1)
+            if r['chemistry']: r['subs'].append(2)
+            if r['urdu']:      r['subs'].append(3)
+            if r['physics']:   r['subs'].append(4)
+            r['feePaid'] = bool(r['fee_paid'])
         db.close()
-        return jsonify(students_list)
+        return jsonify(rows)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/students', methods=['POST'])
-def add_student():
+def addStudent():
     try:
-        data = request.json or {}
-        sid = data.get('id')
-        name = data.get('name', '').strip()
-        class_index = int(data.get('class_index', 0))
-        custom_fee = data.get('custom_fee')
-        subjects = data.get('subjects', [])
-        
-        db = getDB()
-        cur = db.cursor()
-        cur.execute("SELECT id FROM students WHERE id = %s", (sid,))
+        data = request.json
+        db   = getDB()
+        cur  = db.cursor()
+        cur.execute("SELECT id FROM students WHERE id=%s", (data['id'],))
         if cur.fetchone():
             db.close()
-            return jsonify({"success": False, "message": f"Student ID #{sid} already exists!"}), 400
-        
-        # Translate subject configurations into explicit table rows
-        math = 1 if "Math" in subjects else 0
-        english = 1 if "English" in subjects else 0
-        chemistry = 1 if "Chemistry" in subjects else 0
-        urdu = 1 if "Urdu" in subjects else 0
-        physics = 1 if "Physics" in subjects else 0
-        cs = 1 if "Computer Science" in subjects else 0
-        
-        fee_override = int(custom_fee) if custom_fee else None
-        
+            return jsonify({'error': 'ID already exists!'}), 400
+        math      = 1 if 0 in data['subs'] else 0
+        english   = 1 if 1 in data['subs'] else 0
+        chemistry = 1 if 2 in data['subs'] else 0
+        urdu      = 1 if 3 in data['subs'] else 0
+        physics   = 1 if 4 in data['subs'] else 0
         cur.execute(
-            """INSERT INTO students (id, name, class_idx, custom_fee, math, english, chemistry, urdu, physics, computer_science) 
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (sid, name, class_index, fee_override, math, english, chemistry, urdu, physics, cs)
+            """INSERT INTO students
+               (id, name, class_idx, math, english, chemistry, urdu, physics, fee, fee_paid)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (data['id'], data['name'], data['cls'],
+             math, english, chemistry, urdu, physics,
+             data['fee'], 0)
         )
         db.commit()
         db.close()
-        return jsonify({"success": True})
+        return jsonify({'success': True})
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/students/delete', methods=['POST'])
-def delete_student():
+@app.route('/api/students/<int:sid>/pay', methods=['PUT'])
+def payFee(sid):
     try:
-        sid = request.json.get('id')
-        db = getDB()
-        cur = db.cursor()
-        cur.execute("DELETE FROM ledger WHERE student_id = %s", (sid,))
-        cur.execute("DELETE FROM students WHERE id = %s", (sid,))
+        db  = getDB()
+        cur = db.cursor(dictionary=True)
+        cur.execute("SELECT * FROM students WHERE id=%s", (sid,))
+        s = cur.fetchone()
+        if not s:
+            db.close()
+            return jsonify({'error': 'Student not found!'}), 404
+        if s['fee_paid']:
+            db.close()
+            return jsonify({'error': f"Fee already paid for {s['name']}!"}), 400
+        cur.execute("UPDATE students SET fee_paid=1 WHERE id=%s", (sid,))
         db.commit()
         db.close()
-        return jsonify({"success": True})
+        return jsonify({'success': True, 'name': s['name'], 'fee': s['fee']})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
-# ==========================================
-# TEACHER OPERATIONS
-# ==========================================
+@app.route('/api/students/reset', methods=['PUT'])
+def resetStudentFees():
+    try:
+        db  = getDB()
+        cur = db.cursor()
+        cur.execute("UPDATE students SET fee_paid=0")
+        db.commit()
+        db.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/students/search/<int:sid>', methods=['GET'])
+def searchStudent(sid):
+    try:
+        db  = getDB()
+        cur = db.cursor(dictionary=True)
+        cur.execute("SELECT * FROM students WHERE id=%s", (sid,))
+        s = cur.fetchone()
+        if not s:
+            db.close()
+            return jsonify({'error': 'Student not found!'}), 404
+        s['subs'] = []
+        if s['math']:      s['subs'].append(0)
+        if s['english']:   s['subs'].append(1)
+        if s['chemistry']: s['subs'].append(2)
+        if s['urdu']:      s['subs'].append(3)
+        if s['physics']:   s['subs'].append(4)
+        s['feePaid'] = bool(s['fee_paid'])
+        db.close()
+        return jsonify(s)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/teachers', methods=['GET'])
-def get_teachers():
+def getTeachers():
     try:
-        db = getDB()
+        db  = getDB()
         cur = db.cursor(dictionary=True)
         cur.execute("SELECT * FROM teachers")
         rows = cur.fetchall()
+        for r in rows:
+            r['salaryPaid'] = bool(r['salary_paid'])
         db.close()
         return jsonify(rows)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/teachers', methods=['POST'])
-def add_teacher():
+def addTeacher():
     try:
-        data = request.json or {}
-        tid = data.get('id')
-        name = data.get('name', '').strip()
-        
-        db = getDB()
-        cur = db.cursor()
-        cur.execute("SELECT id FROM teachers WHERE id = %s", (tid,))
+        data = request.json
+        db   = getDB()
+        cur  = db.cursor()
+        cur.execute("SELECT id FROM teachers WHERE id=%s", (data['id'],))
         if cur.fetchone():
             db.close()
-            return jsonify({"success": False, "message": f"Teacher ID #{tid} already exists!"}), 400
-            
-        cur.execute("INSERT INTO teachers (id, name) VALUES (%s, %s)", (tid, name))
+            return jsonify({'error': 'ID already exists!'}), 400
+        cur.execute(
+            "INSERT INTO teachers (id,name,dept,salary,salary_paid) VALUES (%s,%s,%s,%s,%s)",
+            (data['id'], data['name'], data['dept'], data['salary'], 0)
+        )
         db.commit()
         db.close()
-        return jsonify({"success": True})
+        return jsonify({'success': True})
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/teachers/delete', methods=['POST'])
-def delete_teacher():
+@app.route('/api/teachers/<int:tid>/pay', methods=['PUT'])
+def paySalary(tid):
     try:
-        tid = request.json.get('id')
-        db = getDB()
-        cur = db.cursor()
-        cur.execute("DELETE FROM teachers WHERE id = %s", (tid,))
-        db.commit()
-        db.close()
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ==========================================
-# FINANCIAL LEDGER & VOUCHER ENGINE
-# ==========================================
-
-@app.route('/api/ledger', methods=['GET'])
-def get_ledger():
-    try:
-        db = getDB()
+        db  = getDB()
         cur = db.cursor(dictionary=True)
-        cur.execute("SELECT voucher_id, student_id, amount, status FROM ledger ORDER BY voucher_id DESC")
-        rows = cur.fetchall()
-        for r in rows:
-            r['amount'] = int(r['amount'])
-        db.close()
-        return jsonify(rows)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/ledger/lookup', methods=['GET'])
-def lookup_ledger():
-    try:
-        sid = request.args.get('id')
-        db = getDB()
-        cur = db.cursor(dictionary=True)
-        
-        cur.execute("SELECT * FROM students WHERE id = %s", (sid,))
-        student_row = cur.fetchone()
-        if not student_row:
+        cur.execute("SELECT * FROM teachers WHERE id=%s", (tid,))
+        t = cur.fetchone()
+        if not t:
             db.close()
-            return jsonify({"found": False})
-            
-        lbl = next((c['class_label'] for c in CLASS_MATRIX if c['class_index'] == student_row['class_idx']), f"Class {student_row['class_idx']}")
-        student_data = {
-            "id": student_row['id'],
-            "name": student_row['name'],
-            "class_label": lbl
-        }
-        
-        cur.execute("SELECT voucher_id, amount, status FROM ledger WHERE student_id = %s ORDER BY voucher_id DESC", (sid,))
-        vouchers_rows = cur.fetchall()
-        vouchers = []
-        for v in vouchers_rows:
-            vouchers.append({
-                "voucher_id": v['voucher_id'],
-                "amount": int(v['amount']),
-                "status": v['status']
-            })
-            
+            return jsonify({'error': 'Teacher not found!'}), 404
+        if t['salary_paid']:
+            db.close()
+            return jsonify({'error': f"Salary already paid for {t['name']}!"}), 400
+        cur.execute("UPDATE teachers SET salary_paid=1 WHERE id=%s", (tid,))
+        db.commit()
         db.close()
-        return jsonify({
-            "found": True,
-            "student": student_data,
-            "vouchers": vouchers
-        })
+        return jsonify({'success': True, 'name': t['name'], 'salary': t['salary']})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/ledger/pay', methods=['POST'])
-def pay_voucher():
+@app.route('/api/teachers/reset', methods=['PUT'])
+def resetTeacherSalaries():
     try:
-        vid = request.json.get('voucher_id')
-        db = getDB()
+        db  = getDB()
         cur = db.cursor()
-        cur.execute("UPDATE ledger SET status = 'Paid' WHERE voucher_id = %s", (vid,))
+        cur.execute("UPDATE teachers SET salary_paid=0")
         db.commit()
         db.close()
-        return jsonify({"success": True})
+        return jsonify({'success': True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/ledger/generate', methods=['POST'])
-def generate_vouchers():
+@app.route('/api/teachers/search/<int:tid>', methods=['GET'])
+def searchTeacher(tid):
     try:
-        db = getDB()
+        db  = getDB()
         cur = db.cursor(dictionary=True)
-        cur.execute("SELECT * FROM students")
-        students = cur.fetchall()
-        
-        generated_count = 0
-        for s in students:
-            # If explicit override is added, use it; otherwise compute based on selected courses
-            if s['custom_fee'] is not None:
-                final_fee = int(s['custom_fee'])
-            else:
-                cfg = next((c for c in CLASS_MATRIX if c['class_index'] == s['class_idx']), {"base_fee": 1500, "per_subject_fee": 300})
-                sub_count = sum([s['math'], s['english'], s['chemistry'], s['urdu'], s['physics'], s['computer_science']])
-                final_fee = cfg['base_fee'] + (sub_count * cfg['per_subject_fee'])
-            
-            # Formulate tracking index tags cleanly
-            v_token = f"V-{uuid.uuid4().hex[:6].upper()}-{s['id']}"
-            cur.execute(
-                "INSERT INTO ledger (voucher_id, student_id, amount, status) VALUES (%s, %s, %s, 'Pending')",
-                (v_token, s['id'], final_fee)
-            )
-            generated_count += 1
-            
-        db.commit()
+        cur.execute("SELECT * FROM teachers WHERE id=%s", (tid,))
+        t = cur.fetchone()
+        if not t:
+            db.close()
+            return jsonify({'error': 'Teacher not found!'}), 404
+        t['salaryPaid'] = bool(t['salary_paid'])
         db.close()
-        return jsonify({"generated": generated_count})
+        return jsonify(t)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/ledger/clear', methods=['POST'])
-def clear_ledger():
-    try:
-        db = getDB()
-        cur = db.cursor()
-        cur.execute("DELETE FROM ledger")
-        db.commit()
-        db.close()
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ==========================================
-# REPORT COMPILATION LOGS
-# ==========================================
-
-@app.route('/api/report', methods=['GET'])
-def generate_report():
-    try:
-        db = getDB()
-        cur = db.cursor(dictionary=True)
-        
-        cur.execute("SELECT COUNT(*) as tally FROM students")
-        total_s = cur.fetchone()['tally']
-        
-        cur.execute("SELECT COUNT(*) as tally FROM teachers")
-        total_t = cur.fetchone()['tally']
-        
-        cur.execute("SELECT SUM(amount) as val FROM ledger WHERE status='Paid'")
-        collected = cur.fetchone()['val'] or 0
-        
-        cur.execute("SELECT SUM(amount) as val FROM ledger WHERE status='Pending'")
-        arrears = cur.fetchone()['val'] or 0
-        
-        report_text = f"""==================================================
-        ACADEMY SYSTEM AUDIT LOG DIAGNOSTIC REPORT
-==================================================
-[SYSTEM EXECUTION STATUS]: STABLE DEPLOYMENT NODE
-[ACTIVE ENROLMENTS COUNT]: {total_s} Students Registered
-[PROVISIONED FACULTY]: {total_t} Active Deployed Teachers
-
-[FINANCIAL LEDGER DIAGNOSTICS]:
- - Total Logged Settled Volume: Rs. {int(collected)}
- - Total Outstanding Arrears Balance: Rs. {int(arrears)}
- - System Accounting Integrity Check: PASS
-
-==================================================
-Report processed successfully from the secure layer.
-"""
-        db.close()
-        return jsonify({"report_text": report_text})
-    except Exception as e:
-        return jsonify({"report_text": f"Error running report calculations: {str(e)}"}), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port)
